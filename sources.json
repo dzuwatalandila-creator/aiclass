@@ -1,0 +1,23 @@
+[
+  {
+    "csv_url": "https://data.humdata.org/dataset/75ecb747-717e-4ce5-b7af-0e13cc95ba63/resource/aaf5c1ca-361e-4aa0-8dc6-b8646aaefe67/download/wfp_markets_mwi.csv",
+    "source_page": "https://data.humdata.org/dataset/wfp-food-prices-for-malawi",
+    "valid": true,
+    "note": "valid (last ~unknown)",
+    "checked": "2025-10-30T08:37:59.190724Z"
+  },
+  {
+    "csv_url": "https://data.humdata.org/dataset/75ecb747-717e-4ce5-b7af-0e13cc95ba63/resource/2f6c5505-58ea-4292-b8ce-e3514219ad85/download/wfp_food_prices_mwi_qc.csv",
+    "source_page": "https://data.humdata.org/dataset/wfp-food-prices-for-malawi",
+    "valid": true,
+    "note": "valid (last ~2016-08-15)",
+    "checked": "2025-10-30T08:38:07.311961Z"
+  },
+  {
+    "csv_url": "https://data.humdata.org/dataset/75ecb747-717e-4ce5-b7af-0e13cc95ba63/resource/da3ed5da-d6ad-4a86-b4bc-b77e74d01ab7/download/wfp_food_prices_mwi.csv",
+    "source_page": "https://data.humdata.org/dataset/wfp-food-prices-for-malawi",
+    "valid": true,
+    "note": "valid (last ~1994-10-15)",
+    "checked": "2025-10-30T08:37:50.284088Z"
+  }
+]

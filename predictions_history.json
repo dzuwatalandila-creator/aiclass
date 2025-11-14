@@ -1,0 +1,61 @@
+[
+  {
+    "timestamp": "2025-11-10T08:09:28.288512Z",
+    "product": "Maize (White Maize)",
+    "district": "Dowa",
+    "subtype": "White Maize",
+    "days": 6,
+    "historical_prices": [
+      950,
+      960,
+      970,
+      980,
+      990,
+      1010,
+      1066
+    ],
+    "predicted_prices": [
+      1051,
+      1054,
+      1064,
+      1044,
+      1081,
+      1130
+    ],
+    "trend": "increase",
+    "advice_bullets": [
+      "• Prices likely to rise — consider storing produce to sell later for better returns. (Planting season: planting season—supply typically low; planting inputs and labor demand are high.)",
+      "• Use proper post-harvest handling to prevent losses during storage.",
+      "• Monitor local demand and transport to time sales for peak prices. Risk: input shortages and variable planting -> future supply uncertain."
+    ]
+  },
+  {
+    "timestamp": "2025-11-10T08:11:29.911368Z",
+    "product": "Maize (White Maize)",
+    "district": "Dowa",
+    "subtype": "White Maize",
+    "days": 5,
+    "historical_prices": [
+      950,
+      960,
+      970,
+      980,
+      990,
+      1010,
+      1066
+    ],
+    "predicted_prices": [
+      1101,
+      1148,
+      1160,
+      1194,
+      1196
+    ],
+    "trend": "increase",
+    "advice_bullets": [
+      "• Prices likely to rise — consider storing produce to sell later for better returns. (Planting season: planting season—supply typically low; planting inputs and labor demand are high.)",
+      "• Use proper post-harvest handling to prevent losses during storage.",
+      "• Monitor local demand and transport to time sales for peak prices. Risk: input shortages and variable planting -> future supply uncertain."
+    ]
+  }
+]

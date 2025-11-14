@@ -1,0 +1,327 @@
+
+
+
+
+
+    
+"""
+DZUMarketPriceApp — FINAL FIXED VERSION
+- Uses REAL CSV from GitHub
+- Matches Maize in Lilongwe correctly
+- No more "No data available"
+- DEVELOPER LOGIN SCREEN (with instant UI after login)
+"""
+import logging
+import os
+import json
+import asyncio
+import datetime
+import numpy as np
+import matplotlib
+matplotlib.set_loglevel("error")
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import requests
+import tempfile
+import pandas as pd
+import io
+from typing import Optional, List, Dict
+from kivy.core.window import Window
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.label import Label
+from kivy.uix.textinput import TextInput
+from kivy.uix.button import Button
+from kivy.uix.spinner import Spinner
+from kivy.uix.popup import Popup
+from kivy.uix.progressbar import ProgressBar
+from kivy.uix.scrollview import ScrollView
+from kivy.clock import Clock, mainthread
+from kivy.metrics import dp
+from kivy.graphics import Color, Rectangle
+from openai import OpenAI
+from kivy.app import App
+
+try:
+    from kivy_garden.matplotlib.backend_kivyagg import FigureCanvasKivyAgg
+except ImportError:
+    print("Error: kivy_garden.matplotlib not installed. Run: pip install kivy_garden.matplotlib")
+    raise SystemExit(1)
+
+# ---------------- Logging ----------------
+logging.basicConfig(level=logging.DEBUG, filename='dzumarketprice.log',
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# ---------------- Settings ----------------
+ADVICE_TONE = "gentle"
+MINISTRY_DATA_URL = os.getenv("MINISTRY_DATA_URL", "").strip()
+CSV_FALLBACK_URL = "https://raw.githubusercontent.com/dzuwatalandila-creator/malawi-prices/main/malawi_price_embeddings.csv"
+
+# ---------------- Developer Login ----------------
+DEV_USERNAME = os.getenv("DEV_USERNAME", "dzuwatalandila")
+DEV_PASSWORD = os.getenv("DEV_PASSWORD", "tala2004ndilaK")
+
+# ---------------- CSV Cache ----------------
+_cached_csv_df: Optional[pd.DataFrame] = None
+
+def _load_csv_fallback() -> pd.DataFrame:
+    global _cached_csv_df
+    if _cached_csv_df is not None:
+        return _cached_csv_df
+    try:
+        logger.info("Downloading fallback CSV from GitHub...")
+        resp = requests.get(CSV_FALLBACK_URL, timeout=12)
+        resp.raise_for_status()
+        _cached_csv_df = pd.read_csv(io.StringIO(resp.text))
+        logger.info(f"CSV loaded: {_cached_csv_df.shape[0]} rows")
+        return _cached_csv_df
+    except Exception as exc:
+        logger.error(f"Failed to load CSV fallback: {exc}")
+        raise
+
+def _price_from_csv(product: str, district: str) -> Optional[float]:
+    try:
+        df = _load_csv_fallback()
+        df.columns = [c.strip().lower() for c in df.columns]
+        commodity_col = next((c for c in df.columns if 'commodity' in c), None)
+        district_col = next((c for c in df.columns if 'district' in c), None)
+        price_col = next((c for c in df.columns if any(k in c for k in ['price', 'mwk', 'value', 'median', 'retail'])), None)
+        if not all([commodity_col, district_col, price_col]):
+            return None
+        df[commodity_col] = df[commodity_col].astype(str).str.strip().str.title()
+        df[district_col] = df[district_col].astype(str).str.strip().str.title()
+        mask = df[commodity_col].str.contains(product, case=False, na=False) & df[district_col].str.contains(district, case=False, na=False)
+        row = df[mask]
+        if row.empty:
+            return None
+        return float(row[price_col].iloc[0])
+    except:
+        return None
+
+CACHE_DIR = os.path.join(tempfile.gettempdir(), "dzumarket_cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+OPENAI_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+client = OpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
+
+# ---------------- Static Data ----------------
+PRODUCT_LIST = ["Maize", "Tobacco", "Tea", "Coffee", "Beans", "Rice", "Groundnuts"]
+DISTRICTS = ["Balaka", "Blantyre", "Chikwawa", "Chiradzulu", "Chitipa", "Dedza", "Dowa", "Karonga", "Kasungu", "Likoma", "Lilongwe", "Machinga", "Mangochi", "Mchinji", "Mulanje", "Mwanza", "Mzimba", "Mzuzu", "Nkhata Bay", "Nkhotakota", "Nsanje", "Ntcheu", "Ntchisi", "Phalombe", "Rumphi", "Salima", "Thyolo", "Zomba"]
+PRODUCT_SUBTYPES = { "Maize": ["Yellow Maize", "White Maize", "Hybrid Maize"], "Tobacco": ["Virginia", "Burley", "Oriental"], "Tea": ["Black Tea", "Green Tea"], "Coffee": ["Robusta", "Arabica"], "Beans": ["Red Beans", "Brown Beans", "White Beans"], "Rice": ["Sativa", "Japonica"], "Groundnuts": ["Red Skin", "Spanish", "Virginia"] }
+HISTORICAL_DAYS = 7
+HISTORICAL_PRICES = {
+    "Maize": {"Blantyre": [1050, 1060, 1070, 1080, 1100, 1130, 1178], "Lilongwe": [1000, 1010, 1020, 1030, 1050, 1080, 1116], "Dowa": [950, 960, 970, 980, 990, 1010, 1066], "Kasungu": [920, 930, 940, 950, 960, 970, 992], "Default": [1050, 1060, 1070, 1080, 1100, 1130, 1200]},
+    "Tobacco": [6100, 6150, 6200, 6250, 6300, 6400, 6600], "Tea": [3000, 3020, 3040, 3060, 3080, 3100, 3300], "Coffee": [5100, 5150, 5200, 5250, 5300, 5400, 5500],
+    "Beans": [2500, 2520, 2540, 2560, 2580, 2600, 2750], "Rice": [2000, 2020, 2040, 2060, 2080, 2100, 2200], "Groundnuts": [1500, 1520, 1540, 1560, 1580, 1600, 1650]
+}
+
+# ---------------- History ----------------
+HISTORY_FILE = "predictions_history.json"
+MAX_HISTORY_ITEMS = 20
+def load_history(): return json.load(open(HISTORY_FILE, "r", encoding="utf-8")) if os.path.exists(HISTORY_FILE) else []
+def save_history(h): json.dump(h[-MAX_HISTORY_ITEMS:], open(HISTORY_FILE, "w", encoding="utf-8"), indent=2)
+def add_history_entry(e): h = load_history(); h.append(e); save_history(h)
+
+# ---------------- Season Helpers ----------------
+def month_to_season_phase(m): return ("planting", "planting season") if m in (11,12,1) else ("growing", "growing season") if m in (2,3) else ("harvest", "harvest season") if m in (4,5,6) else ("storage", "storage season")
+def season_risk_notes(p): return "Risk: oversupply -> prices fall" if p=="harvest" else "Risk: weather affects yield" if p=="growing" else "Risk: storage pests"
+
+# ---------------- Data Loader ----------------
+def find_prices_for(product: str, district: str) -> Optional[List[float]]:
+    single_price = _price_from_csv(product, district)
+    if single_price is not None:
+        return [single_price] * HISTORICAL_DAYS
+    hist = HISTORICAL_PRICES.get(product)
+    prices = hist.get(district, hist.get("Default")) if isinstance(hist, dict) else hist
+    return prices[-HISTORICAL_DAYS:] if prices else [800] * HISTORICAL_DAYS
+
+# ---------------- Advice ----------------
+async def generate_advice_async(product_full, district, days, trend, base_price, last_pred_price):
+    phase, expl = month_to_season_phase(datetime.datetime.now().month)
+    note = season_risk_notes(phase)
+    tips = {
+        "increase": [f"• Prices rising — store now. ({phase.capitalize()}: {expl})", "• Prevent losses in storage.", f"• Time sales for peak. {note}"],
+        "decrease": ["• Prices falling — sell soon.", "• Find nearby buyers.", f"• Reduce storage costs. {note}"],
+        "stable": ["• Prices stable — sell as needed.", "• Compare buyer offers.", f"• Keep small reserve. {note}"]
+    }
+    return tips.get(trend, tips["stable"])
+
+# ---------------- Login Screen ----------------
+class LoginScreen(BoxLayout):
+    def __init__(self, on_success, **kwargs):
+        super().__init__(orientation='vertical', spacing=20, padding=40, **kwargs)
+        self.on_success = on_success
+        self.add_widget(Label(text="Developer Login", font_size='28sp', color=(0.08, 0.25, 0.45, 1)))
+        self.username = TextInput(hint_text='Username', size_hint=(1, None), height=40)
+        self.password = TextInput(hint_text='Password', password=True, size_hint=(1, None), height=40)
+        self.add_widget(self.username); self.add_widget(self.password)
+        btn = Button(text="Log In", size_hint=(1, None), height=50, background_color=(0.12, 0.45, 0.75, 1))
+        btn.bind(on_press=self.check)
+        self.add_widget(btn)
+        self.error = Label(text="", color=(1,0,0,1), size_hint=(1, None), height=30)
+        self.add_widget(self.error)
+    def check(self, _):
+        if self.username.text.strip() == DEV_USERNAME and self.password.text == DEV_PASSWORD:
+            self.error.text = ""
+            self.on_success()
+        else:
+            self.error.text = "Wrong username or password."
+
+# ---------------- Main Market UI ----------------
+class MarketLayout(BoxLayout):
+    def __init__(self, **kwargs):
+        super().__init__(orientation='horizontal', spacing=12, padding=12, **kwargs)
+        left = BoxLayout(orientation='vertical', size_hint=(0.68, 1), spacing=8)
+        self.add_widget(left)
+
+        header = Label(text="DZUMarket PriceApp Predictor", font_size='22sp', size_hint=(1, None), height=50, color=(0.08, 0.25, 0.45, 1), bold=True, halign='center')
+        with header.canvas.before:
+            Color(0.95, 0.95, 0.98, 1)
+            self._header_bg = Rectangle(pos=header.pos, size=header.size)
+        header.bind(pos=lambda *x: header.canvas.ask_update(), size=lambda *x: header.canvas.ask_update())
+        left.add_widget(header)
+
+        inputs = BoxLayout(orientation='vertical', size_hint=(1, None), height=380, spacing=6)
+        left.add_widget(inputs)
+
+        self.district_spinner = Spinner(text="Select District", values=sorted(DISTRICTS), size_hint=(1, None), height=40)
+        self.product_spinner = Spinner(text="Product", values=PRODUCT_LIST, size_hint=(1, None), height=40)
+        self.subtype_spinner = Spinner(text="Select Subtype", values=[], size_hint=(1, None), height=40)
+        self.product_spinner.bind(text=self.update_subtype)
+        inputs.add_widget(self.district_spinner); inputs.add_widget(self.product_spinner); inputs.add_widget(self.subtype_spinner)
+
+        self.days_input = TextInput(hint_text="Days (1–60)", multiline=False, input_filter='int', size_hint=(1, None), height=40)
+        inputs.add_widget(self.days_input)
+
+        live_box = BoxLayout(orientation='vertical', size_hint=(1, None), height=90, spacing=8)
+        inputs.add_widget(live_box)
+        self.live_status = Label(text="[color=00aa00]Ready[/color]", markup=True, size_hint=(1, None), height=30)
+        live_box.add_widget(self.live_status)
+        refresh_btn = Button(text="Refresh Live Prices", size_hint=(1, None), height=50, background_color=(0.1, 0.6, 0.1, 1))
+        refresh_btn.bind(on_press=lambda x: self.force_refresh_live())
+        live_box.add_widget(refresh_btn)
+
+        self.predict_button = Button(text="Predict Price", size_hint=(1, None), height=48, background_color=(0.12, 0.45, 0.75, 1))
+        self.predict_button.bind(on_press=self.start_prediction)
+        inputs.add_widget(self.predict_button)
+
+        self.plot_box = BoxLayout(size_hint=(1, 0.5))
+        left.add_widget(self.plot_box)
+
+        scroll = ScrollView(size_hint=(1, 0.22))
+        self.result_label = Label(text="Select and predict!", size_hint_y=None, height=100, halign="left", valign="top")
+        self.result_label.bind(width=lambda *x: setattr(self.result_label, 'text_size', (self.result_label.width, None)))
+        scroll.add_widget(self.result_label)
+        left.add_widget(scroll)
+
+        right = BoxLayout(orientation='vertical', size_hint=(0.32, 1), spacing=8)
+        self.add_widget(right)
+        right.add_widget(Label(text="Past Predictions", font_size='18sp', size_hint=(1, None), height=36))
+        self.clear_button = Button(text="Clear History", size_hint=(1, None), height=44, background_color=(0.9, 0.3, 0.3, 1))
+        self.clear_button.bind(on_press=lambda x: (os.remove(HISTORY_FILE) if os.path.exists(HISTORY_FILE) else None, self.render_history()))
+        right.add_widget(self.clear_button)
+        self.history_scroll = ScrollView(size_hint=(1, 1))
+        self.history_grid = GridLayout(cols=1, spacing=6, size_hint_y=None)
+        self.history_grid.bind(minimum_height=self.history_grid.setter('height'))
+        self.history_scroll.add_widget(self.history_grid)
+        right.add_widget(self.history_scroll)
+        self.render_history()
+
+    def update_subtype(self, spinner, text):
+        self.subtype_spinner.values = PRODUCT_SUBTYPES.get(text, [])
+        self.subtype_spinner.text = self.subtype_spinner.values[0] if self.subtype_spinner.values else "No subtype"
+
+    def force_refresh_live(self):
+        self.live_status.text = "[color=ffaa00]Loading...[/color]"
+        Clock.schedule_once(lambda dt: asyncio.run(self.async_predict_price(force_refresh=True)), 0.1)
+
+    def start_prediction(self, _):
+        self.predict_button.disabled = True
+        self.result_label.text = "Predicting..."
+        self.popup = Popup(title="Working...", size_hint=(0.4, 0.25), content=ProgressBar())
+        self.popup.open()
+        Clock.schedule_once(lambda dt: asyncio.run(self.async_predict_price()), 0)
+
+    async def async_predict_price(self, force_refresh=False):
+        district = self.district_spinner.text
+        product = self.product_spinner.text
+        subtype = self.subtype_spinner.text if self.subtype_spinner.text not in ("Select Subtype", "No subtype") else ""
+        product_full = f"{product} ({subtype})" if subtype else product
+        try:
+            days = int(self.days_input.text)
+            if not 1 <= days <= 60: raise ValueError
+        except:
+            self.update_ui("Enter days 1–60.")
+            self.close_popup()
+            return
+
+        live_prices = find_prices_for(product, district)
+        historical_prices = live_prices[-HISTORICAL_DAYS:] if live_prices else HISTORICAL_PRICES.get(product, [800]*7)
+        if len(historical_prices) < HISTORICAL_DAYS:
+            historical_prices = [historical_prices[0]] * (HISTORICAL_DAYS - len(historical_prices)) + historical_prices
+
+        base_price = historical_prices[-1]
+        y_pred = base_price + np.cumsum(np.random.randint(-20, 50, size=days))
+        if product == "Maize": y_pred = np.clip(y_pred, 800, 1500)
+        last_pred_price = float(y_pred[-1])
+        trend = "increase" if last_pred_price > base_price else "decrease" if last_pred_price < base_price else "stable"
+        advice = await generate_advice_async(product_full, district, days, trend, base_price, last_pred_price)
+
+        entry = {"timestamp": datetime.datetime.utcnow().isoformat() + "Z", "product": product_full, "district": district, "days": days, "historical_prices": historical_prices, "predicted_prices": y_pred.tolist(), "trend": trend, "advice_bullets": advice}
+        add_history_entry(entry); self.render_history()
+        self.update_ui_with_plot(historical_prices, y_pred, HISTORICAL_DAYS, days, product_full, district, product, advice, source_note=" (CSV)" if live_prices else " (sample)")
+
+    @mainthread
+    def render_history(self):
+        self.history_grid.clear_widgets()
+        for item in reversed(load_history()):
+            btn = Button(text=f"{item['timestamp'][:19].replace('T',' ')} • {item['product']} • {item['trend'].upper()} • {item['predicted_prices'][-1]:.0f} MWK", size_hint_y=None, height=44, halign='left')
+            btn.bind(on_press=lambda b, e=item: asyncio.run(self.reopen(e)))
+            self.history_grid.add_widget(btn)
+
+    async def reopen(self, entry):
+        self.update_ui_with_plot(entry["historical_prices"], np.array(entry["predicted_prices"]), HISTORICAL_DAYS, entry["days"], entry["product"], entry["district"], entry["product"].split()[0], entry["advice_bullets"])
+
+    @mainthread
+    def update_ui_with_plot(self, hist, pred, hdays, days, prod_full, dist, prod, advice, source_note=""):
+        self.plot_box.clear_widgets()
+        fig, ax = plt.subplots(figsize=(8, 3.5))
+        all_x = list(range(1, hdays + days + 1))
+        ax.plot(all_x[:hdays], hist, 'o-', label='Past')
+        ax.plot(all_x[hdays-1:], np.concatenate([hist[-1:], pred]), 'o--', label='Future')
+        ax.set_title(f"{prod_full} in {dist}{source_note}")
+        ax.set_xlabel("Day"); ax.set_ylabel("Price (MWK/kg)"); ax.grid(); ax.legend()
+        self.plot_box.add_widget(FigureCanvasKivyAgg(fig))
+        text = f"{prod_full} — {dist}{source_note}\nCurrent: {hist[-1]:.0f} MWK/kg\nIn {days} days: {pred[-1]:.0f} MWK/kg\nTrend: {('increase' if pred[-1]>hist[-1] else 'decrease' if pred[-1]<hist[-1] else 'stable').upper()}\n\nAdvice:\n" + "\n".join(advice)
+        self.result_label.text = text
+        self.close_popup()
+
+    @mainthread
+    def update_ui(self, text): self.result_label.text = text
+    @mainthread
+    def close_popup(self):
+        self.predict_button.disabled = False
+        if hasattr(self, 'popup') and self.popup: self.popup.dismiss()
+
+# ---------------- App with Login ----------------
+class DZUMarketPriceApp(App):
+    def build(self):
+        Window.size = (1100, 720)
+        Window.minimum_width = 800
+        Window.minimum_height = 480
+        Window.clearcolor = (0.95, 0.95, 0.98, 1)
+
+        self.root = BoxLayout()
+        self.market = MarketLayout()
+        self.login = LoginScreen(self.show_main)
+        self.root.add_widget(self.login)
+        return self.root
+
+    def show_main(self):
+        self.root.clear_widgets()
+        self.root.add_widget(self.market)
+
+if __name__ == "__main__":
+    DZUMarketPriceApp().run()
+
